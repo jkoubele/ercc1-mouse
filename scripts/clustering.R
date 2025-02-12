@@ -52,7 +52,7 @@ cluster_sizes_and_composition <- ggplot(seurat_object@meta.data,
        fill = "Sample",
        title = "Sample Composition and Size of Clusters") +
   theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 9),
         axis.title = element_text(size = 18),
         axis.text = element_text(size = 11),
         plot.title = element_text(size = 20, face = "bold", hjust = 0.5))
