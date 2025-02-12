@@ -9,7 +9,7 @@ input_folder <- file.path(path_prefix, "cellranger_output")
 output_folder <- file.path(path_prefix, "decontX_output")
 dir.create(output_folder)
 
-fraction_of_umis_removed = list()
+fraction_of_umis_removed <- list()
 for (sample_folder in list.dirs(input_folder, recursive = FALSE)) {
   sample_name <- basename(sample_folder)
   print(sample_name)

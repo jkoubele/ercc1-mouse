@@ -8,14 +8,21 @@ path_prefix <- "/ercc1/data"
 
 input_folder <- file.path(path_prefix, "cell_quality_control_output")
 output_folder <- file.path(path_prefix, "clustering_output")
+CCG_data_folder <- file.path(path_prefix, "CCG_data")
+
 dir.create(output_folder)
+
+sample_annotation <- read_tsv(file.path(CCG_data_folder, 'sample_annotation.tsv'))
+seurat_object@meta.data <- seurat_object@meta.data |>
+  left_join(sample_annotation, by = c("sample" = "CCG_sample_id"))
+
 
 seurat_object <- readRDS(file.path(input_folder, "seurat_object.rds")) |>
   SCTransform() |>
   RunPCA()
 
 # PCA diagnostics plots
-pca_by_sample <- DimPlot(seurat_object, reduction = 'pca', group.by = 'sample') +
+pca_by_sample <- DimPlot(seurat_object, reduction = 'pca', group.by = 'sample_name') +
   labs(title = "PCA by sample")
 ggsave(file.path(output_folder, "pca_sample.png"),
        plot = pca_by_sample,
@@ -34,8 +41,27 @@ seurat_object <- seurat_object |>
   FindClusters() |>
   RunUMAP(dims = 1:num_pca_dims)
 
+cluster_sizes_and_composition <- ggplot(seurat_object@meta.data,
+                                        aes(x = seurat_clusters, fill = sample_name)) +
+  geom_bar(position = "stack") +
+  labs(x = "Cluster",
+       y = "Number of Nuclei",
+       fill = "Sample",
+       title = "Sample Composition and Size of Clusters") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.title = element_text(size = 18),
+        axis.text = element_text(size = 11),
+        plot.title = element_text(size = 20, face = "bold", hjust = 0.5))
+
+
+ggsave(file.path(output_folder, "cluster_sizes_barplot.png"),
+       plot = cluster_sizes_and_composition,
+       bg = 'white')
+
+
 # UMAP plots
-umap_by_sample <- DimPlot(seurat_object, reduction = 'umap', group.by = "sample") +
+umap_by_sample <- DimPlot(seurat_object, reduction = 'umap', group.by = "sample_name") +
   labs(title = "UMAP by sample")
 ggsave(file.path(output_folder, "umap_sample.png"),
        plot = umap_by_sample,
