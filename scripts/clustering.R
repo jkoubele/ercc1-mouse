@@ -12,14 +12,17 @@ CCG_data_folder <- file.path(path_prefix, "CCG_data")
 
 dir.create(output_folder)
 
-sample_annotation <- read_tsv(file.path(CCG_data_folder, 'sample_annotation.tsv'))
-seurat_object@meta.data <- seurat_object@meta.data |>
-  left_join(sample_annotation, by = c("sample" = "CCG_sample_id"))
-
-
 seurat_object <- readRDS(file.path(input_folder, "seurat_object.rds")) |>
   SCTransform() |>
   RunPCA()
+
+# Add sample annotation to meta.data
+sample_annotation <- read_tsv(file.path(CCG_data_folder, 'sample_annotation.tsv'))
+original_metadata_rownames <- rownames(seurat_object@meta.data) # left_join unfortunately reset rownames to numeric index
+seurat_object@meta.data <- seurat_object@meta.data |>
+  left_join(sample_annotation, by = c("sample" = "CCG_sample_id"))
+rownames(seurat_object@meta.data) <- original_metadata_rownames
+
 
 # PCA diagnostics plots
 pca_by_sample <- DimPlot(seurat_object, reduction = 'pca', group.by = 'sample_name') +
