@@ -6,8 +6,8 @@ library(Polychrome)
 
 source("https://raw.githubusercontent.com/jkoubele/sc-type-refactored/main/cell_type_identification.R")
 
-path_prefix <- "/cellfile/datapublic/jkoubele/ercc1/data/"
-# path_prefix <- "/ercc1/data/"
+# path_prefix <- "/cellfile/datapublic/jkoubele/ercc1/data/"
+path_prefix <- "/ercc1/data/"
 input_folder <- file.path(path_prefix, "clustering_output")
 output_folder <- file.path(path_prefix, "cell_type_annotation")
 

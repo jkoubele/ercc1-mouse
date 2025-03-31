@@ -16,14 +16,12 @@ for (sample_folder in list.dirs(input_folder, recursive = FALSE)) {
   print(sample_name)
   sample_seurat_object <- readRDS(file.path(sample_folder, "seurat_object.rds"))
   sample_seurat_object$sample <- sample_name
+  sample_seurat_object <- RenameCells(sample_seurat_object, add.cell.id = sample_name)
   sample_list[[sample_name]] <- sample_seurat_object
-
 }
 
 merged_seurat_object <- merge(sample_list[[1]],
-                              y = sample_list[-1],
-                              add.cell.ids = names(sample_list)
-) |>
+                              y = sample_list[-1]) |>
   JoinLayers() |>
   subset(subset = nCount_RNA > 200) # removal of ambient RNA may left some cells with very low UMI count
 # we apply very permissive filtering for now, as recommended by scDblFinder warning
