@@ -15,109 +15,146 @@ dir.create(output_folder)
 
 seurat_object <- readRDS(file.path(input_folder, "seurat_object.rds"))
 
-gene_sct_count_total <- rowSums(seurat_object@assays$SCT$counts)
-expressed_gene_names <- names(gene_sct_count_total[gene_sct_count_total > 0])
-expressed_gene_ids <-  bitr(expressed_gene_names,
-                                fromType = "SYMBOL",
-                                toType = "ENTREZID", 
-                                OrgDb = org.Mm.eg.db)
+gene_name_to_entrze_id <- bitr(rownames(seurat_object),
+                               fromType = "SYMBOL",
+                               toType = "ENTREZID", 
+                               OrgDb = org.Mm.eg.db) |> 
+  rename(gene = SYMBOL)
 
-
-de_genotype <- FindMarkers(seurat_object,
-                           ident.1 = 'KD',
-                           ident.2 = 'Wt',
-                           group.by = 'genotype') |>
-  rownames_to_column('gene')
-
-de_genotype_up <- de_genotype |> dplyr::filter(avg_log2FC > 0, p_val_adj < 0.05)
-de_genotype_down <- de_genotype |> dplyr::filter(avg_log2FC < 0, p_val_adj < 0.05)
-
-de_genotype_up_gene_id <-  bitr(de_genotype_up$gene,
-                                fromType = "SYMBOL",
-                                toType = "ENTREZID", 
-                                OrgDb = org.Mm.eg.db)
-
-de_genotype_down_gene_id <-  bitr(de_genotype_down$gene,
-                                fromType = "SYMBOL",
-                                toType = "ENTREZID", 
-                                OrgDb = org.Mm.eg.db)
-
-go_mf_up <- enrichGO(gene = de_genotype_up_gene_id$ENTREZID, 
-                         OrgDb = org.Mm.eg.db, 
-                         ont = "MF",
-                        universe = expressed_gene_ids$ENTREZID,
-                         readable = TRUE)
-
-go_mf_down <- enrichGO(gene = de_genotype_down_gene_id$ENTREZID, 
-                     OrgDb = org.Mm.eg.db, 
-                     ont = "MF",
-                     universe = expressed_gene_ids$ENTREZID,
-                     readable = TRUE)
-
-barplot_go_mf_up <- barplot(go_mf_up, showCategory=10, title='GO enrichment (MF)')
-barplot_go_mf_down <- barplot(go_mf_down, showCategory=10, title='GO enrichment (MF)')
-
-dotplot_go_mf_up <- barplot(go_mf_up, showCategory=10, title='GO enrichment (MF)')
-
-
-
-write_tsv(de_genotype, file.path(output_folder, "de_genotype_all.tsv"))
-write_tsv(de_genotype_up, file.path(output_folder, "de_genotype_up.tsv"))
-write_tsv(de_genotype_down, file.path(output_folder, "de_genotype_down.tsv"))
-
-Idents(seurat_object) <- "cell_type"
-for (cell_type in unique(seurat_object$cell_type)) {
-  if((! 'Wt' %in% unique(seurat_object$genotype[seurat_object$cell_type == cell_type])) |
-     (! 'KD' %in% unique(seurat_object$genotype[seurat_object$cell_type == cell_type])) ){
-    next # cell type is not present in both genotype groups
+save_de_and_go_enrichment <- function(de,
+                                 expressed_gene_names,
+                                 output_subfolder){
+  expressed_genes <- tibble(gene = expressed_gene_names) |> 
+    left_join(gene_name_to_entrze_id, by = "gene") |>
+    drop_na()
+  
+  de_up <- de |> 
+    dplyr::filter(avg_log2FC > 0, p_val_adj < 0.05)
+  de_down <- de |> 
+    dplyr::filter(avg_log2FC < 0, p_val_adj < 0.05) 
+  
+  write_tsv(de, file.path(output_subfolder, "de_all.tsv"))
+  write_tsv(de_up, file.path(output_subfolder, "de_significant_up.tsv"))
+  write_tsv(de_down, file.path(output_subfolder, "de_significant_down.tsv"))
+  
+  
+  de_list <- list(up = de_up, down = de_down)
+  go_output_folder <- file.path(output_subfolder, 'GO_enrichment')
+  dir.create(go_output_folder)
+  
+  for (direction in names(de_list)) {
+    de_dataframe <- de_list[[direction]] |> drop_na()
+    
+    for (go_ontology in c('MF', 'BP', 'CC')){
+      go_enrichment <- enrichGO(gene = de_dataframe$ENTREZID, 
+                                OrgDb = org.Mm.eg.db, 
+                                ont = go_ontology,
+                                universe = expressed_genes$ENTREZID,
+                                readable = TRUE) 
+      write_tsv(go_enrichment@result, file.path(go_output_folder, paste0('go_', go_ontology, '_', direction, '_all.tsv')))
+      
+      go_enrichment_simplified <- go_enrichment |> clusterProfiler::simplify()
+      write_tsv(go_enrichment_simplified@result, file.path(go_output_folder, paste0('go_', go_ontology, '_', direction, '_simplified.tsv')))
+      
+      top_go_terms <- go_enrichment_simplified@result |>
+        arrange(p.adjust) |>
+        head(15) |>
+        mutate(
+          gene_fraction = as.numeric(sapply(strsplit(GeneRatio, "/"), function(x) as.numeric(x[1]) / as.numeric(x[2]))),
+          Description = ifelse(nchar(Description) > 50, 
+                               paste0(str_sub(Description, 1, 50), '...'), 
+                               Description)
+        ) |>
+        mutate(Description = factor(Description, levels = rev(Description)))
+      
+      go_dotplot <- ggplot(top_go_terms, aes(x = gene_fraction, y = Description, size = Count, color = p.adjust)) +
+        geom_point() +
+        scale_color_gradient(low = "red", high = "blue") + 
+        theme_minimal() +
+        labs(
+          title = paste0('GO ',go_ontology, ' Enrichment (', direction, 'regulated genes)'),
+          x = "Gene Ratio",
+          y = "GO Term",
+          color = "Adjusted p-value",
+          size = "Num. genes"
+        ) +
+        scale_size_continuous(range = c(4, 9)) +
+        theme(axis.text = element_text(size = 12))
+      
+      print(go_dotplot)
+      ggsave(file.path(go_output_folder, paste0('GO_',go_ontology,'_',direction,'.png')),
+             plot = go_dotplot,
+             bg = 'white')
+      
+      
+    }
+    
   }
-
-  de_same_cell_type <- FindMarkers(seurat_object,
-                                   ident.1 = 'KD',
-                                   ident.2 = 'Wt',
-                                   group.by = 'genotype',
-                                   subset.ident = cell_type) |> 
-    rownames_to_column('gene')
-
-  de_same_cell_type_up <- de_same_cell_type |> dplyr::filter(avg_log2FC > 0, p_val_adj < 0.05)
-  de_same_cell_type_down <- de_same_cell_type |> dplyr::filter(avg_log2FC < 0, p_val_adj < 0.05)
-  
-  output_subfolder <- file.path(output_folder, 'de_within_cell_type', cell_type)
-  dir.create(output_subfolder, recursive=TRUE)
-  write_tsv(de_same_cell_type, file.path(output_subfolder, "de_all.tsv"))
-  write_tsv(de_same_cell_type_up, file.path(output_subfolder, "de_up.tsv"))
-  write_tsv(de_same_cell_type_down, file.path(output_subfolder, "de_down.tsv"))
-  
-  # TO-DO: replace with FindAllMarkers() ?
-  de_cell_type_vs_others <- FindMarkers(seurat_object,
-                                   ident.1 = cell_type) |>
-    rownames_to_column('gene')
-  de_cell_type_vs_others_up <- de_cell_type_vs_others |> dplyr::filter(avg_log2FC > 0, p_val_adj < 0.05)
-  de_cell_type_vs_others_down <- de_cell_type_vs_others |> dplyr::filter(avg_log2FC < 0, p_val_adj < 0.05)
-
-  output_subfolder_cell_type_vs_others <- file.path(output_folder, 'de_cell_type_vs_others', cell_type)
-  dir.create(output_subfolder_cell_type_vs_others, recursive=TRUE)
-
-  write_tsv(de_cell_type_vs_others, file.path(output_subfolder_cell_type_vs_others, "de_all.tsv"))
-  write_tsv(de_cell_type_vs_others_up, file.path(output_subfolder_cell_type_vs_others, "de_up.tsv"))
-  write_tsv(de_cell_type_vs_others_down, file.path(output_subfolder_cell_type_vs_others, "de_down.tsv"))
   
 }
 
 
-# Idents(seurat_object) <- "intervention_cell_type"
-# 
-# de_1 <- FindMarkers(seurat_object, ident.1 = "Hematopoietic_cells", ident.2 = "Proximal_tubule_cells")
-# 
-# cell_mapping <- data.frame(
-#   simplified = colnames(seurat_object),
-#   barcode = colnames(GetAssayData(seurat_object, assay = "SCT", layer = "data")),
-#   stringsAsFactors = FALSE
-# )group_1_barcodes <- cell_mapping$barcode[cell_mapping$simplified %in% WhichCells(seurat_object, idents = "Wt_Distal_tubule_cells")]
-# group_2_barcodes <- cell_mapping$barcode[cell_mapping$simplified %in% WhichCells(seurat_object, idents = "KD_Distal_tubule_cells")]sct_assay <- seurat_object@assays$SCTde_1 <- FindMarkers(
-#   object = sct_assay,
-#   cells.1 = group_1_barcodes,
-#   cells.2 = group_2_barcodes,
-#   test.use = "wilcox"
-# )de_1_up <- de_1 |> dplyr::filter(avg_log2FC > 0, p_val_adj<0.05)
-# de_1_down <- de_1 |> dplyr::filter(avg_log2FC < 0, p_val_adj<0.05)
+# Compare KD vs. Wt using all cells
+output_subfolder_all_cells <- file.path(output_folder, 'KD_vs_Wt_all_cells')
+dir.create(output_subfolder_all_cells)
+
+gene_sct_count_total <- rowSums(seurat_object@assays$SCT$counts)
+expressed_gene_names_all_cells <- names(gene_sct_count_total[gene_sct_count_total > 0])
+
+de <- FindMarkers(seurat_object,
+                  ident.1 = 'KD',
+                  ident.2 = 'Wt',
+                  group.by = 'genotype') |>
+  rownames_to_column('gene') |> 
+  left_join(gene_name_to_entrze_id, by = 'gene')
+
+save_de_and_go_enrichment(de, expressed_gene_names_all_cells, output_subfolder_all_cells)
+
+
+Idents(seurat_object) <- "cell_type"
+for (cell_type in unique(seurat_object$cell_type)) {
+  
+  if((! 'Wt' %in% unique(seurat_object$genotype[seurat_object$cell_type == cell_type])) |
+     (! 'KD' %in% unique(seurat_object$genotype[seurat_object$cell_type == cell_type])) ){
+    next # cell type is not present in both genotype groups
+  }
+  
+
+  de <- FindMarkers(seurat_object,
+                                   ident.1 = 'KD',
+                                   ident.2 = 'Wt',
+                                   group.by = 'genotype',
+                                   subset.ident = cell_type) |> 
+  rownames_to_column('gene') |> 
+  left_join(gene_name_to_entrze_id, by = 'gene')
+  
+  output_subfolder_kd_cell_type <- file.path(output_folder, 'KD_effect_by_cell_type', cell_type)
+  dir.create(output_subfolder_kd_cell_type, recursive = TRUE)
+  
+  gene_sct_count_total <- rowSums(subset(seurat_object, idents=cell_type)@assays$SCT$counts)
+  expressed_gene_names_in_cell_type <- names(gene_sct_count_total[gene_sct_count_total > 0])
+  
+  
+  save_de_and_go_enrichment(de, expressed_gene_names_in_cell_type, output_subfolder_kd_cell_type)
+
+  # Cell type vs all other cells
+  if((! 'Wt' %in% unique(seurat_object$genotype[seurat_object$cell_type == cell_type])) |
+     (! 'KD' %in% unique(seurat_object$genotype[seurat_object$cell_type == cell_type])) ){
+    print(paste(cell_type, 'is not present in both genotype groups!'))
+    next
+  }
+  de_cell_type_vs_others <- FindMarkers(seurat_object,
+                    ident.1 = cell_type) |> 
+    rownames_to_column('gene') |> 
+    left_join(gene_name_to_entrze_id, by = 'gene')
+  
+  output_subfolder_cell_type_vs_others <- file.path(output_folder, 'cell_type_vs_others', cell_type)
+  dir.create(output_subfolder_cell_type_vs_others, recursive = TRUE)
+  
+  save_de_and_go_enrichment(de_cell_type_vs_others, 
+                            expressed_gene_names_all_cells,
+                            output_subfolder_cell_type_vs_others)
+ 
+}
+
+
