@@ -11,7 +11,7 @@ docker build -t custom_bioconductor ./docker_files/bioconductor/
 
 The RStudio server can be then run by:
 ```
- docker run -it -e PASSWORD=pass -e USERID=$(id -u) -e GROUPID=$(id -g) -p 8787:8787 -v /cellfile/datapublic/jkoubele/ercc1:/ercc1 custom_bioconductor
+ docker run -it -e PASSWORD=pass -e USERID=$(id -u) -e GROUPID=$(id -g) -p 9000:8787 -v /cellfile/datapublic/jkoubele/ercc1:/ercc1 custom_bioconductor
 ```
 
 The analysis pipeline consists of several steps, each run by separate script. The results of these
@@ -21,3 +21,6 @@ steps are saved to disk (serializing the Seurat objects to .rds files).
 2. **Doublets detection** using [scDblFinder](https://bioconductor.org/packages/release/bioc/html/scDblFinder.html) can be run by using the script [doublet_detection.R](scripts/doublet_detection.R).
 3. **Cell QC**: filter out outlier cells based on the number of detected genes, UMIs and mitochondrial content, using the script [cell_quality_control.R](scripts/cell_quality_control.R).
 4. **Clustering and dim. reduction** is performed by the script [clustering.R](scripts/clustering.R).
+5. **Cell type annotation** is done in the script [cell_type_annotation.R](scripts/cell_type_annotation.R). It uses
+[re-implemented version](https://github.com/jkoubele/sc-type-refactored) of the [sc-type](https://github.com/IanevskiAleksandr/sc-type) tool.
+6. **Differential expression analysis and GO enrichment** is done in the script [de_analysis.R](scripts/de_analysis.R).
